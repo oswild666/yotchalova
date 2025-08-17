@@ -56,15 +56,17 @@
             },
             WALL_NOTES: [60, 62, 64, 65, 67, 69], // C, D, E, F, G, A
             WALL_ZONES: 6,
-            BALL_BASE_SPEED: 0.15,
-            SPEED_INCREASE: 0.005,
-            MAX_SPEED: 0.4
+            BALL_BASE_SPEED: 0.1125, // 0.15 * 0.75
+            SPEED_INCREASE: 0.00375, // 0.005 * 0.75
+            MAX_SPEED: 0.3, // 0.4 * 0.75
+            BOUNCE_RANDOMNESS: 0.1 // 10% randomness
         };
 
         // === ИГРОВЫЕ ПЕРЕМЕННЫЕ ===
         let scene, camera, renderer;
         let ball, paddle, bricks = [];
-        let ballVelocity = { x: CONFIG.BALL_BASE_SPEED, y: -CONFIG.BALL_BASE_SPEED };
+        let ballVelocity = { x: 0, y: 0 };
+        let isBallLaunched = false;
         let keys = {};
         let score = 0;
         let combo = 0;
@@ -101,9 +103,20 @@
             createBricks();
 
             // События
-            window.addEventListener('keydown', (e) => keys[e.key] = true);
+            window.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+                if (e.code === 'Space' && !isBallLaunched) {
+                    isBallLaunched = true;
+                    ballVelocity = {
+                        x: (Math.random() - 0.5) * CONFIG.BALL_BASE_SPEED * 2,
+                        y: CONFIG.BALL_BASE_SPEED
+                    };
+                }
+            });
             window.addEventListener('keyup', (e) => keys[e.key] = false);
             window.addEventListener('resize', onWindowResize);
+
+            resetBall(); // Set initial state
 
             // Запуск игры
             animate();
@@ -294,6 +307,11 @@
             return 440 * Math.pow(2, (midi - 69) / 12);
         }
 
+        function applyBounceRandomness(value) {
+            const randomness = 1 + (Math.random() - 0.5) * 2 * CONFIG.BOUNCE_RANDOMNESS;
+            return value * randomness;
+        }
+
         // === ИГРОВАЯ ЛОГИКА ===
         function update() {
             // Управление ракеткой
@@ -307,26 +325,33 @@
             // Ограничение движения ракетки
             paddle.position.x = Math.max(-3.5, Math.min(3.5, paddle.position.x));
 
-            // Движение мяча
-            gameTime += 0.016;
             const speedMultiplier = Math.min(1 + gameTime * CONFIG.SPEED_INCREASE, CONFIG.MAX_SPEED / CONFIG.BALL_BASE_SPEED);
-            
-            ball.position.x += ballVelocity.x * speedMultiplier;
-            ball.position.y += ballVelocity.y * speedMultiplier;
+
+            if (isBallLaunched) {
+                // Движение мяча
+                gameTime += 0.016;
+
+                ball.position.x += ballVelocity.x * speedMultiplier;
+                ball.position.y += ballVelocity.y * speedMultiplier;
+
+                // Проверка столкновений
+                checkCollisions();
+            } else {
+                // Мяч следует за ракеткой
+                ball.position.x = paddle.position.x;
+                ball.position.y = paddle.position.y + 0.15;
+            }
 
             // Обновление UI
             document.getElementById('score').textContent = `Счёт: ${score}`;
             document.getElementById('combo').textContent = `Комбо: ${combo}`;
             document.getElementById('speed').textContent = `Скорость: ${speedMultiplier.toFixed(1)}x`;
-
-            // Проверка столкновений
-            checkCollisions();
         }
 
         function checkCollisions() {
             // Столкновение со стенами
             if (ball.position.x <= -3.9 || ball.position.x >= 3.9) {
-                ballVelocity.x = -ballVelocity.x;
+                ballVelocity.x = applyBounceRandomness(-ballVelocity.x);
                 const wallZone = Math.floor((ball.position.y + 4) / (8 / CONFIG.WALL_ZONES));
                 const noteIndex = Math.min(wallZone, CONFIG.WALL_NOTES.length - 1);
                 playWallNote(CONFIG.WALL_NOTES[noteIndex]);
@@ -334,7 +359,7 @@
             }
 
             if (ball.position.y >= 3.9) {
-                ballVelocity.y = -ballVelocity.y;
+                ballVelocity.y = applyBounceRandomness(-ballVelocity.y);
                 playWallNote(CONFIG.WALL_NOTES[Math.floor(Math.random() * CONFIG.WALL_NOTES.length)]);
                 combo = 0;
             }
@@ -346,11 +371,13 @@
             }
 
             // Столкновение с ракеткой
-            if (ball.position.y <= -3.4 && 
-                ball.position.y >= -3.5 && 
+            if (ballVelocity.y < 0 &&
+                ball.position.y <= -3.35 &&
+                ball.position.y >= -3.65 &&
                 Math.abs(ball.position.x - paddle.position.x) <= 0.6) {
                 
-                ballVelocity.y = -ballVelocity.y;
+                ball.position.y = -3.34; // Prevent sticking
+                ballVelocity.y = applyBounceRandomness(-ballVelocity.y);
                 // Изменение угла в зависимости от места удара
                 const hitPosition = (ball.position.x - paddle.position.x) / 0.6;
                 ballVelocity.x = hitPosition * CONFIG.BALL_BASE_SPEED * 2;
@@ -371,7 +398,7 @@
                     brick.userData.hit = true;
                     brick.visible = false;
                     
-                    ballVelocity.y = -ballVelocity.y;
+                    ballVelocity.y = applyBounceRandomness(-ballVelocity.y);
                     
                     playBrickSound(brick.userData.type);
                     playBrickMelody();
@@ -383,11 +410,8 @@
         }
 
         function resetBall() {
-            ball.position.set(0, -2, 0);
-            ballVelocity = { 
-                x: (Math.random() - 0.5) * CONFIG.BALL_BASE_SPEED * 2,
-                y: -CONFIG.BALL_BASE_SPEED 
-            };
+            isBallLaunched = false;
+            ballVelocity = { x: 0, y: 0 };
         }
 
         // === РЕНДЕРИНГ ===
