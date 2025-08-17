@@ -82,7 +82,7 @@
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
             // --- Tape Delay Setup ---
-            delay = audioContext.createDelay(3.0); // Max delay 3s
+            delay = audioContext.createDelay(6.0); // Max delay 6s, for wider modulation
             feedbackGain = audioContext.createGain();
             delayInputGain = audioContext.createGain();
 
@@ -333,13 +333,13 @@
             // --- Modulate Tape Delay Time ---
             if (delay) {
                 const maxSpeedMultiplier = CONFIG.MAX_SPEED / CONFIG.BALL_BASE_SPEED;
-                // Handle division by zero or NaN case if maxSpeedMultiplier is 1
                 const normalizedSpeed = maxSpeedMultiplier > 1 ? (speedMultiplier - 1) / (maxSpeedMultiplier - 1) : 0;
 
-                // Map normalized speed [0, 1] to delay time [1.5s, 4.5s] (50% modulation around 3s)
-                const newDelayTime = 1.5 + normalizedSpeed * 3.0;
+                // Map normalized speed [0, 1] to a very wide delay time range for dramatic effect
+                const newDelayTime = 0.1 + normalizedSpeed * 5.8; // Range: 0.1s to 5.9s
 
-                delay.delayTime.setTargetAtTime(newDelayTime, audioContext.currentTime, 0.02);
+                // Set value directly to create "pitch-drop" artifacts, as requested
+                delay.delayTime.value = newDelayTime;
             }
             // --- End Modulation ---
 
@@ -401,7 +401,6 @@
                 combo++;
                 if (combo >= 3) {
                     playBrickMelody();
-                    combo = 0;
                 }
             }
 
