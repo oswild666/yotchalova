@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Космический Арканоид</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Arial', sans-serif;
+            color: #00ff88;
+        }
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            font-size: 18px;
+            text-shadow: 0 0 10px #00ff88;
+        }
+        #score {
+            margin-bottom: 10px;
+        }
+        #combo {
+            color: #ff6600;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div id="score">Счёт: 0</div>
+            <div id="combo">Комбо: 0</div>
+            <div id="speed">Скорость: 1.0x</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // === КОНФИГУРАЦИЯ ===
+        const CONFIG = {
+            // Музыкальные скейлы (в MIDI нотах)
+            SCALES: {
+                'C Minor': [60, 62, 63, 65, 67, 68, 69, 71], // C, D, Eb, F, G, Ab, Bb, B
+                'G Natural Minor': [67, 69, 70, 72, 74, 75, 77, 79], // G, A, Bb, C, D, Eb, F, G
+                'A Mixolydian': [69, 71, 72, 74, 76, 77, 79, 81], // A, B, C, D, E, F, G, A
+                'D Locrian': [62, 63, 65, 66, 69, 70, 71, 73] // D, Eb, F, Gb, A, Bb, B, C
+            },
+            WALL_NOTES: [60, 62, 64, 65, 67, 69], // C, D, E, F, G, A
+            WALL_ZONES: 6,
+            BALL_BASE_SPEED: 0.15,
+            SPEED_INCREASE: 0.005,
+            MAX_SPEED: 0.4
+        };
+
+        // === ИГРОВЫЕ ПЕРЕМЕННЫЕ ===
+        let scene, camera, renderer;
+        let ball, paddle, bricks = [];
+        let ballVelocity = { x: CONFIG.BALL_BASE_SPEED, y: -CONFIG.BALL_BASE_SPEED };
+        let keys = {};
+        let score = 0;
+        let combo = 0;
+        let gameTime = 0;
+        let currentScale = 'C Minor';
+        let audioContext;
+        let activeNotes = [];
+
+        // === ИНИЦИАЛИЗАЦИЯ ===
+        function init() {
+            // Создание аудио контекста
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Создание сцены
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000011);
+            
+            // Добавление звёздного фона
+            createStarfield();
+
+            // Камера
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // Рендерер
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+
+            // Создание игровых объектов
+            createBall();
+            createPaddle();
+            createWalls();
+            createBricks();
+
+            // События
+            window.addEventListener('keydown', (e) => keys[e.key] = true);
+            window.addEventListener('keyup', (e) => keys[e.key] = false);
+            window.addEventListener('resize', onWindowResize);
+
+            // Запуск игры
+            animate();
+        }
+
+        // === СОЗДАНИЕ ОБЪЕКТОВ ===
+        function createBall() {
+            const geometry = new THREE.SphereGeometry(0.1, 16, 16);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0x00ffff,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.5
+            });
+            ball = new THREE.Mesh(geometry, material);
+            ball.position.set(0, -2, 0);
+            scene.add(ball);
+        }
+
+        function createPaddle() {
+            const geometry = new THREE.BoxGeometry(1, 0.1, 0.1);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0xff6600,
+                emissive: 0xff6600,
+                emissiveIntensity: 0.3
+            });
+            paddle = new THREE.Mesh(geometry, material);
+            paddle.position.set(0, -3.5, 0);
+            scene.add(paddle);
+        }
+
+        function createWalls() {
+            // Верхняя и нижняя стены
+            const wallGeometry = new THREE.BoxGeometry(8, 0.2, 0.1);
+            const wallMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x0088ff,
+                emissive: 0x0088ff,
+                emissiveIntensity: 0.2
+            });
+
+            const topWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            topWall.position.set(0, 4, 0);
+            scene.add(topWall);
+
+            const bottomWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            bottomWall.position.set(0, -4, 0);
+            scene.add(bottomWall);
+
+            // Левые и правые стены
+            const sideWallGeometry = new THREE.BoxGeometry(0.2, 8, 0.1);
+            const leftWall = new THREE.Mesh(sideWallGeometry, wallMaterial);
+            leftWall.position.set(-4, 0, 0);
+            scene.add(leftWall);
+
+            const rightWall = new THREE.Mesh(sideWallGeometry, wallMaterial);
+            rightWall.position.set(4, 0, 0);
+            scene.add(rightWall);
+        }
+
+        function createBricks() {
+            const brickGeometry = new THREE.BoxGeometry(0.8, 0.3, 0.1);
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00];
+            const types = ['FM1', 'FM2', 'FM3', 'FM4'];
+
+            for (let row = 0; row < 6; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const material = new THREE.MeshBasicMaterial({ 
+                        color: colors[row % 4],
+                        emissive: colors[row % 4],
+                        emissiveIntensity: 0.2
+                    });
+                    
+                    const brick = new THREE.Mesh(brickGeometry, material);
+                    brick.position.set(-3 + col * 0.9, 2 - row * 0.4, 0);
+                    brick.userData = { 
+                        type: types[row % 4],
+                        hit: false 
+                    };
+                    scene.add(brick);
+                    bricks.push(brick);
+                }
+            }
+        }
+
+        function createStarfield() {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.02,
+                transparent: true
+            });
+
+            const starsVertices = [];
+            for (let i = 0; i < 1000; i++) {
+                const x = (Math.random() - 0.5) * 200;
+                const y = (Math.random() - 0.5) * 200;
+                const z = (Math.random() - 0.5) * 200;
+                starsVertices.push(x, y, z);
+            }
+
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+            const starField = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(starField);
+        }
+
+        // === АУДИО ФУНКЦИИ ===
+        function playWallNote(note) {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(midiToFreq(note), audioContext.currentTime);
+            gainNode.gain.setValueAtTime(0.7, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 2);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 2);
+        }
+
+        function playBrickSound(type) {
+            // FM синтез для Bell звуков
+            const carrier = audioContext.createOscillator();
+            const modulator = audioContext.createOscillator();
+            const modulatorGain = audioContext.createGain();
+            const gainNode = audioContext.createGain();
+
+            // Выбор частот для разных типов
+            const frequencies = {
+                'FM1': { carrier: 440, modulator: 220, ratio: 2 },
+                'FM2': { carrier: 523, modulator: 330, ratio: 1.5 },
+                'FM3': { carrier: 660, modulator: 440, ratio: 1.2 },
+                'FM4': { carrier: 784, modulator: 523, ratio: 1.8 }
+            };
+
+            const freq = frequencies[type];
+            
+            carrier.frequency.setValueAtTime(freq.carrier, audioContext.currentTime);
+            modulator.frequency.setValueAtTime(freq.modulator, audioContext.currentTime);
+            modulatorGain.gain.setValueAtTime(freq.carrier * freq.ratio, audioContext.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+
+            modulator.connect(modulatorGain);
+            modulatorGain.connect(carrier.frequency);
+            carrier.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            carrier.start();
+            modulator.start();
+            carrier.stop(audioContext.currentTime + 1.5);
+            modulator.stop(audioContext.currentTime + 1.5);
+        }
+
+        function playBrickMelody() {
+            const melodyNotes = generateMelodyNotes(3 + Math.floor(Math.random() * 3));
+            melodyNotes.forEach((note, index) => {
+                setTimeout(() => {
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(midiToFreq(note), audioContext.currentTime);
+                    gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + 1);
+                }, index * 300);
+            });
+        }
+
+        function generateMelodyNotes(count) {
+            const scale = CONFIG.SCALES[currentScale];
+            const notes = [];
+            for (let i = 0; i < count; i++) {
+                notes.push(scale[Math.floor(Math.random() * scale.length)]);
+            }
+            return notes;
+        }
+
+        function midiToFreq(midi) {
+            return 440 * Math.pow(2, (midi - 69) / 12);
+        }
+
+        // === ИГРОВАЯ ЛОГИКА ===
+        function update() {
+            // Управление ракеткой
+            if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+                paddle.position.x -= 0.15;
+            }
+            if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+                paddle.position.x += 0.15;
+            }
+
+            // Ограничение движения ракетки
+            paddle.position.x = Math.max(-3.5, Math.min(3.5, paddle.position.x));
+
+            // Движение мяча
+            gameTime += 0.016;
+            const speedMultiplier = Math.min(1 + gameTime * CONFIG.SPEED_INCREASE, CONFIG.MAX_SPEED / CONFIG.BALL_BASE_SPEED);
+            
+            ball.position.x += ballVelocity.x * speedMultiplier;
+            ball.position.y += ballVelocity.y * speedMultiplier;
+
+            // Обновление UI
+            document.getElementById('score').textContent = `Счёт: ${score}`;
+            document.getElementById('combo').textContent = `Комбо: ${combo}`;
+            document.getElementById('speed').textContent = `Скорость: ${speedMultiplier.toFixed(1)}x`;
+
+            // Проверка столкновений
+            checkCollisions();
+        }
+
+        function checkCollisions() {
+            // Столкновение со стенами
+            if (ball.position.x <= -3.9 || ball.position.x >= 3.9) {
+                ballVelocity.x = -ballVelocity.x;
+                const wallZone = Math.floor((ball.position.y + 4) / (8 / CONFIG.WALL_ZONES));
+                const noteIndex = Math.min(wallZone, CONFIG.WALL_NOTES.length - 1);
+                playWallNote(CONFIG.WALL_NOTES[noteIndex]);
+                combo = 0;
+            }
+
+            if (ball.position.y >= 3.9) {
+                ballVelocity.y = -ballVelocity.y;
+                playWallNote(CONFIG.WALL_NOTES[Math.floor(Math.random() * CONFIG.WALL_NOTES.length)]);
+                combo = 0;
+            }
+
+            // Падение мяча
+            if (ball.position.y <= -4.1) {
+                resetBall();
+                combo = 0;
+            }
+
+            // Столкновение с ракеткой
+            if (ball.position.y <= -3.4 && 
+                ball.position.y >= -3.5 && 
+                Math.abs(ball.position.x - paddle.position.x) <= 0.6) {
+                
+                ballVelocity.y = -ballVelocity.y;
+                // Изменение угла в зависимости от места удара
+                const hitPosition = (ball.position.x - paddle.position.x) / 0.6;
+                ballVelocity.x = hitPosition * CONFIG.BALL_BASE_SPEED * 2;
+                
+                combo++;
+                if (combo >= 3) {
+                    playBrickMelody();
+                    combo = 0;
+                }
+            }
+
+            // Столкновение с кирпичами
+            bricks.forEach(brick => {
+                if (!brick.userData.hit && 
+                    Math.abs(ball.position.x - brick.position.x) < 0.5 &&
+                    Math.abs(ball.position.y - brick.position.y) < 0.25) {
+                    
+                    brick.userData.hit = true;
+                    brick.visible = false;
+                    
+                    ballVelocity.y = -ballVelocity.y;
+                    
+                    playBrickSound(brick.userData.type);
+                    playBrickMelody();
+                    
+                    score += 10;
+                    combo++;
+                }
+            });
+        }
+
+        function resetBall() {
+            ball.position.set(0, -2, 0);
+            ballVelocity = { 
+                x: (Math.random() - 0.5) * CONFIG.BALL_BASE_SPEED * 2,
+                y: -CONFIG.BALL_BASE_SPEED 
+            };
+        }
+
+        // === РЕНДЕРИНГ ===
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // === ЗАПУСК ===
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
