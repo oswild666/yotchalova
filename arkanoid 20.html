@@ -98,11 +98,11 @@
 
             // --- Master Limiter Setup ---
             limiter = audioContext.createDynamicsCompressor();
-            limiter.threshold.value = -5;
+            limiter.threshold.value = -10; // More aggressive
             limiter.knee.value = 0;
             limiter.ratio.value = 20;
             limiter.attack.value = 0.001;
-            limiter.release.value = 0.1;
+            limiter.release.value = 0.05; // Faster release
             limiter.connect(audioContext.destination);
             // --- End Master Limiter Setup ---
 
@@ -110,6 +110,7 @@
             delay = audioContext.createDelay(6.0); // Max delay 6s, for wider modulation
             feedbackGain = audioContext.createGain();
             delayInputGain = audioContext.createGain();
+            delayInputGain.gain.value = 0.4; // Static 40% wet level
 
             delay.delayTime.value = 3.0;
             feedbackGain.gain.value = 0.61;
@@ -274,9 +275,7 @@
             
             oscillator.connect(gainNode);
             gainNode.connect(limiter);
-            if (combo > 2) {
-                gainNode.connect(delayInputGain);
-            }
+            gainNode.connect(delayInputGain);
             
             oscillator.start();
             oscillator.stop(audioContext.currentTime + 2);
@@ -310,9 +309,7 @@
             modulatorGain.connect(carrier.frequency);
             carrier.connect(gainNode);
             gainNode.connect(limiter);
-            if (combo > 2) {
-                gainNode.connect(delayInputGain);
-            }
+            gainNode.connect(delayInputGain);
 
             carrier.start();
             modulator.start();
@@ -334,9 +331,7 @@
                     
                     oscillator.connect(gainNode);
                     gainNode.connect(limiter);
-                    if (combo > 2) {
-                        gainNode.connect(delayInputGain);
-                    }
+                    gainNode.connect(delayInputGain);
                     
                     oscillator.start();
                     oscillator.stop(audioContext.currentTime + 1);
@@ -574,6 +569,21 @@
             camera.position.z = z * Math.cos(rotSpeed) - x * Math.sin(rotSpeed);
             camera.lookAt(scene.position);
             // --- End Camera Orbit ---
+
+            // --- Modulate Delay by Camera Angle ---
+            if (feedbackGain && delayInputGain) {
+                const angle = Math.atan2(camera.position.x, camera.position.z);
+                const normalizedAngle = Math.abs(angle) / Math.PI; // 0 to 1
+
+                // Modulate feedback (decay)
+                const newFeedback = 0.61 + normalizedAngle * 0.24; // Range [0.61, 0.85]
+                feedbackGain.gain.setTargetAtTime(newFeedback, audioContext.currentTime, 0.1);
+
+                // Modulate wet level (volume) - DISABLED as per user request
+                // const newWetLevel = normalizedAngle * 0.3; // Range [0, 0.3]
+                // delayInputGain.gain.setTargetAtTime(newWetLevel, audioContext.currentTime, 0.1);
+            }
+            // --- End Modulation ---
 
             update();
             renderer.render(scene, camera);
