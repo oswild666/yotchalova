@@ -56,9 +56,9 @@
             },
             WALL_NOTES: [60, 62, 64, 65, 67, 69], // C, D, E, F, G, A
             WALL_ZONES: 6,
-            BALL_BASE_SPEED: 0.1125, // 0.15 * 0.75
-            SPEED_INCREASE: 0.00375, // 0.005 * 0.75
-            MAX_SPEED: 0.3, // 0.4 * 0.75
+            BALL_BASE_SPEED: 0.09, // 0.1125 * 0.8
+            SPEED_INCREASE: 0.003, // 0.00375 * 0.8
+            MAX_SPEED: 0.24, // 0.3 * 0.8
             BOUNCE_RANDOMNESS: 0.1 // 10% randomness
         };
 
@@ -74,11 +74,29 @@
         let currentScale = 'C Minor';
         let audioContext;
         let activeNotes = [];
+        let delay, feedbackGain, delayInputGain;
 
         // === ИНИЦИАЛИЗАЦИЯ ===
         function init() {
             // Создание аудио контекста
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            // --- Tape Delay Setup ---
+            delay = audioContext.createDelay(3.0); // Max delay 3s
+            feedbackGain = audioContext.createGain();
+            delayInputGain = audioContext.createGain();
+
+            delay.delayTime.value = 3.0;
+            feedbackGain.gain.value = 0.61;
+
+            // Feedback loop
+            delayInputGain.connect(delay);
+            delay.connect(feedbackGain);
+            feedbackGain.connect(delay);
+
+            // Output delay to destination
+            delay.connect(audioContext.destination);
+            // --- End Tape Delay Setup ---
 
             // Создание сцены
             scene = new THREE.Scene();
@@ -209,6 +227,9 @@
             
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
+            if (combo > 2) {
+                gainNode.connect(delayInputGain);
+            }
             
             oscillator.start();
             oscillator.stop(audioContext.currentTime + 2);
@@ -242,6 +263,9 @@
             modulatorGain.connect(carrier.frequency);
             carrier.connect(gainNode);
             gainNode.connect(audioContext.destination);
+            if (combo > 2) {
+                gainNode.connect(delayInputGain);
+            }
 
             carrier.start();
             modulator.start();
@@ -263,6 +287,9 @@
                     
                     oscillator.connect(gainNode);
                     gainNode.connect(audioContext.destination);
+                    if (combo > 2) {
+                        gainNode.connect(delayInputGain);
+                    }
                     
                     oscillator.start();
                     oscillator.stop(audioContext.currentTime + 1);
@@ -302,6 +329,19 @@
             paddle.position.x = Math.max(-3.5, Math.min(3.5, paddle.position.x));
 
             const speedMultiplier = Math.min(1 + gameTime * CONFIG.SPEED_INCREASE, CONFIG.MAX_SPEED / CONFIG.BALL_BASE_SPEED);
+
+            // --- Modulate Tape Delay Time ---
+            if (delay) {
+                const maxSpeedMultiplier = CONFIG.MAX_SPEED / CONFIG.BALL_BASE_SPEED;
+                // Handle division by zero or NaN case if maxSpeedMultiplier is 1
+                const normalizedSpeed = maxSpeedMultiplier > 1 ? (speedMultiplier - 1) / (maxSpeedMultiplier - 1) : 0;
+
+                // Map normalized speed [0, 1] to delay time [1.5s, 4.5s] (50% modulation around 3s)
+                const newDelayTime = 1.5 + normalizedSpeed * 3.0;
+
+                delay.delayTime.setTargetAtTime(newDelayTime, audioContext.currentTime, 0.02);
+            }
+            // --- End Modulation ---
 
             if (isBallLaunched) {
                 // Движение мяча
@@ -376,11 +416,11 @@
                     
                     ballVelocity.y = applyBounceRandomness(-ballVelocity.y);
                     
+                    combo++;
+                    score += 10;
+
                     playBrickSound(brick.userData.type);
                     playBrickMelody();
-                    
-                    score += 10;
-                    combo++;
                 }
             });
         }
